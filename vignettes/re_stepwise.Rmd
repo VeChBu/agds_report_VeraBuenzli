@@ -1,0 +1,135 @@
+---
+title: "re_stepwise"
+author: "Vera"
+date: "2025-04-14"
+output: html_document
+---
+#Evaluation of All Bivariate Models
+
+This script is an implementation for a stepwise forward regression. The data used is the half-hourly fluxes dataset provided by the Geocomputation Group at the University of Bern and contains a subset of data from the FLUXNET dataset of Davos.
+
+```{r}
+# Load required packages
+library(tidyverse)
+library(purrr)
+library(ggplot2)
+
+# Load data directly from the URL
+url <- "https://raw.githubusercontent.com/geco-bern/agds_book/refs/heads/main/book/data/df_for_stepwise_regression.csv"
+df <- read.csv(url)
+
+# Check column names
+names(df)
+
+# Define target variable
+target_var <- "GPP_NT_VUT_REF"
+
+# Custom bivariate regression function
+bivariate_regressions <- function(data, target, ignore = NULL) {
+  predictors <- setdiff(names(data), c(target, ignore))
+  models <- list()
+  
+  for (pred in predictors) {
+    f <- as.formula(paste(target, "~", pred))
+    models[[pred]] <- lm(f, data = data)
+  }
+  return(models)
+}
+
+# Calculate bivariate regression models
+r_squared <- bivariate_regressions(df, target_var, c("siteid", "TIMESTAMP")) |> 
+  purrr::map(~summary(.)$r.squared)
+
+r_squared <- data.frame(
+  value = unlist(r_squared),
+  variable = names(r_squared)
+)
+
+# Reshape data for plotting
+df_long <- df |> 
+  select(-siteid, -TIMESTAMP) |> 
+  pivot_longer(cols = -all_of(target_var), names_to = "variable", values_to = "value")
+
+# Visualization: Bivariate regressions
+ggplot(df_long) +
+  geom_jitter(aes(value, .data[[target_var]], colour = variable), size = 0.1, na.rm = TRUE) + 
+  geom_smooth(aes(value, .data[[target_var]]), method = lm, se = FALSE, colour = "black", na.rm = TRUE) +
+  geom_text(data = r_squared, aes(x = Inf, y = Inf, label = paste("R² =", round(value, 4))), 
+            hjust = 1.1, vjust = 1.1, size = 2.5) +
+  facet_wrap(~variable, scales = "free_x") +
+  labs(title = "Bivariate Regressions with GPP_NT_VUT_REF",
+       x = "Predictor value", y = "GPP_NT_VUT_REF") +
+  theme_minimal()
+```
+# Discussion of Bivariate Regressions
+From the bivariate regressions, it is evident that some predictors show a stronger linear relationship with the target variable GPP_NT_VUT_REF than others. For instance, PPFD_IN, SW_IN_F, and W_IN_F_MDS have relatively high R² values (~0.43–0.45), indicating a strong association with GPP. In contrast, variables like P_F, WS_F, and PA_F show almost no explanatory power (R² close to 0).
+Overall, most predictors explain only a small proportion of the variance in GPP_NT_VUT_REF, suggesting that multivariate models are necessary to better capture the variability.
+
+# Stepwise Forward Regression
+Based on the insights from the bivariate regressions, a stepwise forward regression was performed to build a multivariate predictive model.
+```{r}
+# Remove rows with NAs before modeling
+df_clean <- df %>%
+  select(-siteid, -TIMESTAMP) %>%
+  drop_na()
+    
+# Initialize initial model on clean data
+initial_model <- lm(GPP_NT_VUT_REF ~ 1, data = df_clean)
+
+# Stepwise Forward Regression function (same as oben)
+stepwise_forward_regression <- function(data, target_var, initial_model) {
+  current_model <- initial_model
+  predictors <- setdiff(names(data), target_var)
+  model_summary <- list()
+  
+  while (length(predictors) > 0) {
+    current_aic <- AIC(current_model)
+    best_aic <- current_aic
+    best_predictor <- NULL
+    
+    for (pred in predictors) {
+      new_model <- update(current_model, paste("~ . +", pred))
+      new_aic <- AIC(new_model)
+      
+      if (new_aic < best_aic) {
+        best_aic <- new_aic
+        best_predictor <- pred
+        best_model <- new_model
+      }
+    }
+    
+    if (!is.null(best_predictor)) {
+      current_model <- best_model
+      predictors <- setdiff(predictors, best_predictor)
+      model_summary[[best_predictor]] <- summary(best_model)
+    } else {
+      break
+    }
+  }
+  
+  return(list(final_model = current_model, model_summary = model_summary))
+}
+
+# Perform stepwise forward regression
+stepwise_result <- stepwise_forward_regression(df_clean, target_var, initial_model)
+
+# Extract the final model
+final_model <- stepwise_result$final_model
+model_summary <- stepwise_result$model_summary
+
+# Add predicted values to the cleaned dataframe
+df_clean <- df_clean %>%
+  mutate(predicted = predict(final_model))
+
+# Plot actual vs predicted values
+ggplot(df_clean, aes(x = predicted, y = GPP_NT_VUT_REF)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(formula = y~x, method = "lm", se = FALSE, color = "red") +
+  labs(title = "Predicted vs Actual GPP_NT_VUT_REF",
+       x = "Predicted GPP_NT_VUT_REF",
+       y = "Actual GPP_NT_VUT_REF") +
+  theme_minimal()
+```
+# Discussion of Final Model (Stepwise Forward Regression)
+The plot of predicted versus actual GPP_NT_VUT_REF values shows a clear positive linear relationship, indicating that the final model is able to capture the general trend of the data. However, there is considerable scatter around the red regression line, especially at higher GPP values, suggesting that the model does not perfectly predict all observations. This could imply that although the selected variables improve the prediction, some variability remains unexplained, possibly due to nonlinear effects, interactions between predictors, or missing variables.
+Overall, the stepwise forward regression successfully identifies relevant predictors, but the model fit is moderate and could be further improved with more sophisticated modeling approaches.

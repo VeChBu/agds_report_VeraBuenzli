@@ -1,0 +1,59 @@
+---
+title: "re_tidy"
+author: "Vera Buenzli"
+date: "2025-03-03"
+output: html_document
+---
+# Analyzing changes in soil organic matter during elevated CO2 experiments
+
+# General Inforamtion
+This report explores the log response ratio of various experiments in a dataset. Data used in this report comes from the study of van Groenigen et al. 2014, https://doi.org/10.1126/science.1249534. It contains soil parameters and will be used to calculate the log response ratio for experiments in various groupings. First, the Excel file was cleaned to be machine-readable and then saved as a CSV file.
+```{r}
+library(dplyr)
+library(knitr)
+
+data_experiment <- read.csv2("../input/Faster Decomposition_DatabaseS1.csv")
+
+#define time phases
+data_experiment <- data_experiment %>% 
+  dplyr::mutate(phase = dplyr::case_when(
+    `years` < 3 ~ "early",
+    `years` >= 3 & `years` <= 6 ~ "mid",
+    `years` > 6 ~ "late"
+  ))
+
+#Calculate the log-response ratio for each observation
+data_experiment <- data_experiment %>% 
+  dplyr::mutate(RR = log(as.numeric(mean_increased_CO2__gCm.2) / as.numeric(mean_ambient_CO2_gCm.2)))
+print(data_experiment)
+
+#Aggregate data by phase and calculate the mean
+data_rr_aggregated <- data_experiment %>%
+  dplyr::group_by(phase) %>%
+  dplyr::summarise(mean_RR = mean(RR, na.rm = TRUE), .groups = "drop")
+print(data_rr_aggregated)
+
+#Present results as tables
+knitr::kable(data_rr_aggregated, caption = "Mean log-response ratio by phase")   
+```
+
+#What are the data that you are looking at?
+I am analyzing soil organic carbon (SOC) measurements from experiments where ecosystems were exposed to:
+
+- Ambient CO2 (normal atmospheric conditions)
+- Elevated CO2 (higher CO2 levels due to anthropogenic influence)
+
+#What do you expect your analysis to show, what is your hypothesis? How should soil organic matter content change under elevated CO2?
+Elevated CO2 leads to an increase in soil organic matter content over time.
+This is because:
+
+- Higher CO2 boosts plant growth (via photosynthesis), leading to more organic matter entering the soil.
+- Increased root biomass could contribute to greater carbon storage.
+
+Early Phase (<3 years): Small or no significant increase in SOC (system adaptation phase).
+Mid-Phase (3-6 years): Increase in SOC as more plant biomass contributes to the soil.
+Late Phase (>6 years): SOC increase might slow down due to stabilization processes or increased decomposition.
+
+#Interpret your results after aggregating the data: What do your final numbers mean? Do they support your initial hypothesis? Why so, why not?
+The trend shows a decrease in the effect over time, which was not what I initially expected.
+The final results show that soil organic carbon generally increased under elevated CO2, especially in the mid-phase, supporting the hypothesis that higher CO2 enhances soil carbon storage. However, the effect stabilizes or declines in the late phase, possibly due to soil saturation or increased decomposition, suggesting that long-term carbon sequestration may be limited.

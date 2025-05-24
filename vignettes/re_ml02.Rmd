@@ -1,0 +1,174 @@
+---
+title: "re_ml02"
+author: "Vera Buenzli"
+date: "2025-05-14"
+output: html_document
+---
+## Report Exercise - Supervised machine learning II
+# Introduction
+In this exercise, we investigate the concept of model generalisability in a spatial context by training KNN models on ecosystem flux data from two different sites: Davos (CH-Dav) and Laegern (CH-Lae). We aim to understand how well models trained on one site perform on another, and what implications this has for spatial upscaling.
+
+We use flux data from two FLUXNET stations:
+
+**Davos (CH-Dav):**
+- Elevation: ~1560 m
+- Vegetation: Subalpine spruce forest (Picea abies)
+- Climate: Alpine climate with cold winters and short summers
+- Mean Annual Temperature: ~1.5°C
+- Annual Precipitation: ~1000 mm
+
+**Laegern (CH-Lae):**
+- Elevation: ~866 m
+- Vegetation: Mixed deciduous-coniferous forest (mainly beech and spruce)
+- Climate: Temperate, more moderate
+- Mean Annual Temperature: ~8.0°C
+- Annual Precipitation: ~1150 mm
+
+The two sites differ significantly in altitude, temperature regime, and forest structure. These differences likely influence ecosystem fluxes such as NEE (Net Ecosystem Exchange) and thus model performance when generalizing.
+
+```{r}
+# Load required libraries
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(tidyr)
+library(caret)
+library(recipes)
+library(knitr)
+
+# Load data from GitHub
+url_Davos <- "https://raw.githubusercontent.com/geco-bern/agds/refs/heads/main/data/FLX_CH-Dav_FLUXNET2015_FULLSET_DD_1997-2014_1-3.csv"
+df_dav <- read_csv(url_Davos)
+
+url_Laegern <- "https://raw.githubusercontent.com/geco-bern/agds/refs/heads/main/data/FLX_CH-Lae_FLUXNET2015_FULLSET_DD_2004-2014_1-4.csv"
+df_lae <- read_csv(url_Laegern)
+
+# Select relevant variables and remove missing values
+vars <- c("TA_F", "SW_IN_F", "VPD_F", "P_F", "WS_F", "NEE_VUT_REF")
+df_dav <- df_dav %>% select(all_of(vars)) %>% drop_na()
+df_lae <- df_lae %>% select(all_of(vars)) %>% drop_na()
+
+# Note: We use the same five environmental variables for all models to ensure comparability.
+
+set.seed(42)
+
+# Split datasets into training (80%) and testing (20%)
+split_dav <- createDataPartition(df_dav$NEE_VUT_REF, p = 0.8, list = FALSE)
+train_dav <- df_dav[split_dav, ]
+test_dav <- df_dav[-split_dav, ]
+
+split_lae <- createDataPartition(df_lae$NEE_VUT_REF, p = 0.8, list = FALSE)
+train_lae <- df_lae[split_lae, ]
+test_lae <- df_lae[-split_lae, ]
+
+# Combine datasets for third model
+train_both <- bind_rows(train_dav, train_lae)
+test_both <- bind_rows(test_dav, test_lae)
+
+
+# Function to create preprocessing recipe
+make_recipe <- function(data) {
+  recipe(NEE_VUT_REF ~ ., data = data) %>%
+    step_YeoJohnson(all_predictors()) %>%
+    step_center(all_predictors()) %>%
+    step_scale(all_predictors())
+}
+
+# Function to train a KNN model using caret and recipe
+train_knn <- function(train_data) {
+  rec <- make_recipe(train_data)
+  
+  train(
+    rec,
+    data = train_data,
+    method = "knn",
+    trControl = trainControl(method = "cv", number = 5),
+    tuneLength = 10,  # Tests 10 values of k
+    metric = "RMSE"
+  )
+}
+
+# Train models
+mod_dav <- train_knn(train_dav)
+mod_lae <- train_knn(train_lae)
+mod_both <- train_knn(train_both)
+
+# Function to evaluate a model on a test set
+evaluate_model <- function(model, test_data) {
+  y_true <- test_data$NEE_VUT_REF
+  y_pred <- predict(model, newdata = test_data)
+  
+  data.frame(
+    RMSE = sqrt(mean((y_true - y_pred)^2)),
+    MAE = mean(abs(y_true - y_pred)),
+    R2 = 1 - sum((y_true - y_pred)^2) / sum((y_true - mean(y_true))^2)
+  )
+}
+
+# Evaluate all models on all test sets
+results <- bind_rows(
+  evaluate_model(mod_dav, test_dav) %>% mutate(Model = "Dav", Testset = "Dav"),
+  evaluate_model(mod_dav, test_lae) %>% mutate(Model = "Dav", Testset = "Lae"),
+  evaluate_model(mod_dav, test_both) %>% mutate(Model = "Dav", Testset = "Both"),
+  
+  evaluate_model(mod_lae, test_dav) %>% mutate(Model = "Lae", Testset = "Dav"),
+  evaluate_model(mod_lae, test_lae) %>% mutate(Model = "Lae", Testset = "Lae"),
+  evaluate_model(mod_lae, test_both) %>% mutate(Model = "Lae", Testset = "Both"),
+  
+  evaluate_model(mod_both, test_dav) %>% mutate(Model = "Both", Testset = "Dav"),
+  evaluate_model(mod_both, test_lae) %>% mutate(Model = "Both", Testset = "Lae"),
+  evaluate_model(mod_both, test_both) %>% mutate(Model = "Both", Testset = "Both")
+)
+
+# Reshape the results into wide format for comparison
+results_wide <- results %>%
+  pivot_wider(names_from = Testset, values_from = c(RMSE, MAE, R2)) %>%
+  arrange(Model)
+
+# Display results as table
+kable(results_wide, digits = 2, caption = "Evaluation metrics (RMSE, MAE, R²) of KNN models on different test sets")
+
+```
+# Visualization: Davos-trained model tested on Laegern
+```{r}
+# Scatterplot: Predictions vs Observed
+test_preds <- data.frame(
+  Observed = test_lae$NEE_VUT_REF,
+  Predicted = predict(mod_dav, newdata = test_lae)
+)
+
+ggplot(test_preds, aes(x = Observed, y = Predicted)) +
+  geom_point(alpha = 0.4) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(
+    title = "Dav-trained model tested on Laegern",
+    x = "Observed NEE", y = "Predicted NEE"
+  ) +
+  theme_minimal()
+
+```
+# Figure Interpretation:
+The scatterplot shows considerable spread and a consistent underestimation of large negative NEE values. This suggests a clear bias and poor generalization of the Davos-trained model when applied to Laegern. The red dashed line represents the ideal 1:1 prediction, which the model fails to approximate well.
+
+# Discussion
+What patterns do you observe?
+The Davos-only model performs well on Davos but poorly on Laegern.
+The Laegern-only model shows the opposite pattern: low performance on Davos, acceptable on Laegern.
+The combined model performs moderately across all test sets.
+Key finding: Models trained on a single site have difficulty generalizing to other locations with different environmental conditions.
+
+How well do models transfer between sites?
+Davos → Laegern: RMSE = 3.57, R² = 0.02 → High error, almost no explained variance.
+Laegern → Davos: RMSE = 2.50, R² = -0.82 → Even worse performance; the model is less accurate than simply using the mean.
+This performance drop is likely due to differences in climate, forest type, and topography:
+    Davos is alpine, colder, with subalpine coniferous forests.
+    Laegern is lower, milder, with mixed deciduous-coniferous forests.
+
+# Performance of the combined model
+The combined model benefits from more training data diversity. It reduces overfitting to one site, but does not perform as well as site-specific models on their own site. This is expected in heterogeneous environments.
+
+# Is training on both sites a "true out-of-sample" test?
+No. Since both sites are included in training, the model has already seen data from both environments. A truly out-of-sample evaluation would require testing on a new, independent site, e.g., in Spain. We would expect lower performance due to unfamiliar conditions.
+
+# Conclusion
+This exercise highlights the importance of site-specific training in ecological modeling and the challenge of transferring models across heterogeneous landscapes. While combining data from multiple sites improves generalizability, it cannot fully compensate for ecological and climatic differences. Future work should explore more complex features and model types, as well as validation on independent sites.

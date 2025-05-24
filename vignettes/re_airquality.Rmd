@@ -1,0 +1,69 @@
+---
+title: "re_airquality"
+author: "Vera Buenzli"
+date: "2025-03-10"
+output: html_document
+---
+
+# Report Content
+The airquality dataset in R contains air pollution data collected in New York between May and September 1973. The dataset includes six variables:
+
+  - Ozone (ppb, parts per billion)
+  - Solar.R (solar radiation in langleys)
+  - Wind (wind speed in mph)
+  - Temp (temperature in degrees Fahrenheit)
+  - Month (numerical representation of months, 5 = May, etc.)
+  - Day (day of the month)
+
+# Research Question
+How does temperature and wind speed influence ozone concentration in New York’s air during the summer months of 1973?
+
+# Key Statistical Metrics
+Mean Ozone Concentration: 42.13 ppb (excluding missing values)
+Temperature Range: 56°F - 97°F
+Wind Speed Range: 1.7 - 20.7 mph
+
+# Creating figures to answer my question
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+datasets::airquality
+```
+
+```{r}
+
+# Create a new "Date" column by combining year, month and day
+airquality <- airquality %>%
+  drop_na(Ozone) %>% # NA is set to 0
+  mutate(Date = as.Date(paste(1973, Month, Day, sep = "-")))
+
+# Plot ozone concentration over time
+plotme1 <- ggplot(data = airquality, aes(x = Date, y = Ozone)) + 
+  geom_line(color = "blue") +  # Line plot, ignoring missing values
+  labs(title = "Ozone concentration over time", x = "Date", y = "Ozone (ppb)") +
+  theme_classic()
+print(plotme1)
+```
+
+```{r}
+# Scatterplot of Ozone concentration vs Temperature with a fitted regression line
+plotme2 <- ggplot(airquality, aes(x=Temp, y=Ozone)) +
+  geom_point(color='red', alpha=0.6) +  # Scatter plot with transparent points
+  geom_smooth(formula = y~x, method='lm', se=FALSE, color='blue') +  # Linear regression line
+  labs(title='Ozone vs Temperature', x='Temperature (°F)', y='Ozone (ppb)') +
+  theme_minimal()
+print(plotme2)
+```
+```{r}
+# Scatterplot of Ozone concentration vs Wind Speed with a fitted regression line
+plotme3 <- ggplot(airquality, aes(x=Wind, y=Ozone)) +
+  geom_point(color='green', alpha=0.6) +  # Scatter plot with transparency
+  geom_smooth(formula = y~x, method='lm', se=FALSE, color='blue') +  # Linear regression line
+  labs(title='Ozone vs Wind Speed', x='Wind Speed (mph)', y='Ozone (ppb)') +
+  theme_minimal()
+print(plotme3)
+```
+
+#Interpretation & Conclusion
+The analysis confirms that ozone levels tend to rise with increasing temperatures and decrease with stronger winds. This aligns with expectations since ozone formation is influenced by sunlight and stagnation of air masses. While my initial hypothesis regarding temperature was correct, other factors such as solar radiation and humidity, which were not included in this dataset, may also play significant roles.

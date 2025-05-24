@@ -1,0 +1,9 @@
+---
+title: "re_paircoding"
+output: html_document
+---
+My repository:
+https://github.com/VeChBu/agds_chapter-8
+
+Link to the forked repository:
+https://github.com/VeChBu/agds_code_management_partner
